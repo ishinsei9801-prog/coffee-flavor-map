@@ -1,0 +1,465 @@
+<title>産地フレーバーマップ</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+  /* Layout: single plot card (SVG quadrant scatter) + result panel below, stacked on one column at phone width. */
+  :root{
+    color-scheme: light;
+    --font-display: 'Shippori Mincho', serif;
+    --font-body: 'Zen Kaku Gothic New', 'Hiragino Sans', sans-serif;
+
+    --page:          #f9f9f7;
+    --surface:       #fcfcfb;
+    --text-primary:  #0b0b0b;
+    --text-secondary:#52514e;
+    --text-muted:    #898781;
+    --accent:        #d9602b;
+    --accent-wash:   rgba(217,96,43,0.08);
+    --accent-wash-2: rgba(217,96,43,0.14);
+    --gridline:      #e1e0d9;
+    --axis:          #c3c2b7;
+    --border:        rgba(11,11,11,0.10);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      color-scheme: dark;
+      --page:          #0d0d0d;
+      --surface:       #1a1a19;
+      --text-primary:  #f0efec;
+      --text-secondary:#c3c2b7;
+      --text-muted:    #8f8d87;
+      --accent:        #e97a44;
+      --accent-wash:   rgba(233,122,68,0.14);
+      --accent-wash-2: rgba(233,122,68,0.22);
+      --gridline:      #2c2c2a;
+      --axis:          #383835;
+      --border:        rgba(255,255,255,0.10);
+    }
+  }
+  :root[data-theme="dark"]{
+    color-scheme: dark;
+    --page:          #0d0d0d;
+    --surface:       #1a1a19;
+    --text-primary:  #f0efec;
+    --text-secondary:#c3c2b7;
+    --text-muted:    #8f8d87;
+    --accent:        #e97a44;
+    --accent-wash:   rgba(233,122,68,0.14);
+    --accent-wash-2: rgba(233,122,68,0.22);
+    --gridline:      #2c2c2a;
+    --axis:          #383835;
+    --border:        rgba(255,255,255,0.10);
+  }
+
+  *{ box-sizing: border-box; }
+  html, body{ overflow-x: hidden; max-width: 100%; }
+  body{
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 28px 48px;
+    word-break: keep-all;
+  }
+  .nw{ white-space: nowrap; }
+  .wrap{ max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+
+  header.intro{ display:flex; flex-direction:column; gap:10px; position: relative; padding-left: 14px; }
+  header.intro::before{
+    content:""; position:absolute; left:0; top:4px; bottom:4px; width:3px; border-radius:3px;
+    background: linear-gradient(180deg, var(--accent), transparent);
+  }
+  .eyebrow{
+    font-size: 11.5px; letter-spacing: 0.14em; color: var(--accent);
+    text-transform: uppercase; font-weight: 500;
+  }
+  h1{
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: clamp(26px, 6vw, 33px);
+    margin: 0;
+    text-wrap: balance;
+    letter-spacing: 0.02em;
+  }
+  .lede{ color: var(--text-secondary); font-size: 14.5px; line-height: 1.75; margin: 0; max-width: 54ch; }
+  .howto{
+    font-size: 13px; color: var(--text-secondary); background: var(--accent-wash);
+    border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; line-height:1.65;
+  }
+  .howto b{ color: var(--text-primary); }
+
+  .card{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 20px 20px 16px;
+    box-shadow: 0 1px 2px rgba(11,11,11,0.03), 0 12px 28px -18px rgba(11,11,11,0.18);
+  }
+
+  .chart-head{ display:flex; justify-content: flex-end; align-items: baseline; margin-bottom: 10px; }
+  .chart-head span{ font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+  svg.plot{ width: 100%; height: auto; display:block; touch-action: manipulation; cursor: crosshair; overflow: hidden; }
+  svg.plot text{ font-family: var(--font-body); }
+  .axis-label{ fill: var(--text-secondary); font-size: 12px; font-weight: 400; }
+  .quad-label{ fill: var(--text-secondary); font-size: 11px; font-weight: 400; font-family: var(--font-display); font-style: italic; }
+  .axis-line{ stroke: var(--axis); stroke-width: 1; }
+  .axis-arrow-head{ fill: var(--axis); }
+
+  .origin-dot{ fill: var(--accent); stroke: var(--surface); stroke-width: 1.5; cursor: pointer; }
+  .origin-dot.selected{ fill: var(--accent); r: 4; }
+  .origin-label{ fill: var(--text-primary); font-size: 11px; font-weight: 400; font-family: var(--font-display); cursor: pointer; }
+  .origin-label.selected{ font-weight: 500; fill: var(--text-primary); }
+
+  .tap-marker{ fill: none; stroke: var(--accent); stroke-width: 1; opacity: 0.45; }
+  .tap-marker.active{ animation: tap-pulse 1.6s ease-out infinite; }
+  @keyframes tap-pulse{
+    0%   { r: 8;  opacity: 0.5; }
+    70%  { r: 15; opacity: 0;   }
+    100% { r: 15; opacity: 0;   }
+  }
+
+  @keyframes reveal-in{
+    from{ opacity: 0; transform: translateY(5px); }
+    to{ opacity: 1; transform: translateY(0); }
+  }
+
+  .detail{
+    min-height: 68px; display: flex; flex-direction: column; gap: 12px; justify-content: center;
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+  }
+  .detail .placeholder{ color: var(--text-muted); font-size: 13px; line-height: 1.7; margin: auto 0; text-align:center; padding: 10px 8px; }
+
+  .detail-compact{
+    display:flex; align-items:center; justify-content: space-between; gap: 10px; cursor: pointer;
+    animation: reveal-in .28s ease-out;
+  }
+  .detail-compact .name{
+    font-family: var(--font-display); font-size: 19px; font-weight: 500; color: var(--text-primary);
+    display:flex; align-items:baseline; gap: 6px; flex-wrap: wrap;
+  }
+  .detail-compact .tap-hint{ font-size: 12px; color: var(--accent); font-weight: 500; white-space: nowrap; }
+
+  .result-top{ display:flex; align-items:baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; animation: reveal-in .32s ease-out; }
+  .result-top h3{
+    font-family: var(--font-display); font-size: 23px; font-weight: 500; margin: 0; color: var(--text-primary);
+    display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  }
+  .roast-tag{ font-family: var(--font-body); font-size: 13px; font-weight: 500; }
+  .roast-tag.roast-浅{ color: #b9842c; }
+  .roast-tag.roast-中{ color: var(--accent); }
+  .roast-tag.roast-深{ color: #7a4a26; }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]) .roast-tag.roast-浅{ color: #d9a24f; }
+    :root:not([data-theme="light"]) .roast-tag.roast-深{ color: #c99568; }
+  }
+  :root[data-theme="dark"] .roast-tag.roast-浅{ color: #d9a24f; }
+  :root[data-theme="dark"] .roast-tag.roast-深{ color: #c99568; }
+  .result-top .quad-tag{
+    font-size: 11.5px; color: var(--accent); font-weight: 500; white-space: nowrap;
+    background: var(--accent-wash); padding: 4px 10px; border-radius: 999px;
+  }
+  .detail p.aroma, .detail p.desc{ margin: 0; color: var(--text-secondary); font-size: 13.5px; line-height: 1.8; animation: reveal-in .36s ease-out; }
+  .detail p.aroma b, .detail p.desc b{ color: var(--text-primary); font-weight: 500; }
+  .scores{ display:flex; flex-direction: column; gap: 10px; animation: reveal-in .4s ease-out; }
+  .score-row{ display:flex; align-items:center; gap: 14px; }
+  .score-row .label{ width: 40px; flex-shrink:0; font-size: 14px; font-weight: 500; color: var(--text-primary); }
+  .score-row .stars{ font-size: 18px; letter-spacing: 2px; line-height: 1; }
+  .score-row .stars .filled{ color: var(--accent); }
+  .score-row .stars .empty{ color: var(--gridline); }
+
+  .notable{ margin: 0; color: var(--text-secondary); font-size: 13.5px; line-height: 1.8; animation: reveal-in .38s ease-out; }
+  .notable b{ color: var(--text-primary); font-weight: 500; }
+
+  .collapse-hint{ font-size: 11.5px; color: var(--text-muted); margin: 0; cursor: pointer; }
+
+  footer.note{ font-size: 11.5px; color: var(--text-muted); line-height: 1.7; margin: 0; padding: 0 2px; }
+</style>
+
+<div class="wrap">
+  <header class="intro">
+    <span class="eyebrow">Issin Coffee — Origin Guide</span>
+    <h1>産地フレーバーマップ</h1>
+    <p class="lede">酸味とコクの2軸で<br>世界の代表的な産地を見渡せる<br>参考マップです。<br>好みの場所をタップすると、<br>近い産地をおすすめします。</p>
+  </header>
+
+  <p class="howto">チャートの中の<br><b>好きな位置をタップ</b><br>してみてください。<br>右に行くほど酸味が強く、<br>上に行くほどコクが強い産地です。<br>現れた<b>産地の名前を</b><br><b>もう一度タップ</b>すると<br>香りや甘みなどの<br>詳しい風味が見られます。</p>
+
+  <div class="card">
+    <div class="chart-head">
+      <span>18産地×3焙煎・参考値</span>
+    </div>
+    <svg class="plot" viewBox="0 0 440 396" id="plot" role="img" aria-label="酸味とコクによるコーヒー産地マップ"></svg>
+    <div class="detail" id="detail">
+      <p class="placeholder">チャートをタップすると、ここに近い産地が表示されます。</p>
+    </div>
+  </div>
+
+  <footer class="note">
+    ※ 各産地の基準値は<br>産地ガイド資料の酸味・コクの5段階評価と、<br>風味の説明文からの苦味・甘みの推定値です。<br>そこから浅煎り・中煎り・深煎りでの<br>一般的な変化（浅煎り＝酸味と香りが立つ、<br>深煎り＝苦味とコクが増し、<br>酸味が落ち着く、甘みは中煎りで、<br>最も出やすい）を加味して、<br>同じ産地でも焙煎度によって、<br>風味が変わるように調整しています。<br>実際の風味は農園・ロットや<br>焙煎の工程によっても、変わります。
+  </footer>
+</div>
+
+<script>
+(function(){
+  // ---- base data at each origin's own typical roast: [name, acidity, bitterness, sweetness, body, basePos(1浅/2中/3深), taste phrases (2, short), aroma keyword, notable names] ----
+  // taste & aroma are both per roast position: [浅, 中, 深] — each a short 2-phrase pair.
+  // Phrases favor concrete, familiar comparisons (specific fruits/sweets/spices) over
+  // coffee-jargon categories (e.g. "スパイス" alone, "ウッディ", "アーシー"), and taste vs.
+  // aroma are written separately so they don't just restate each other.
+  // every phrase is kept to 10 characters or fewer, so it never wraps awkwardly on a phone screen.
+  var ORIGINS_BASE = [
+    ["タンザニア",   4,2,3,3, 2, [["グレープフルーツ","青いフルーティー感"],["オレンジの爽快さ","野性的な果実味"],["赤ワインの力強さ","香ばしいビターさ"]], [["グレープフルーツ","青々しい香り"],["ベリーの香り","フルーティーな香り"],["カカオの香り","スモーキーな香り"]], ["キリマンジャロ","KIBO"]],
+    ["グアテマラ",   3,3,3,4, 2, [["オレンジの酸味","すっきり柑橘感"],["ビターチョコの深み","オレンジの明るさ"],["ビターチョコの苦味","香ばしいナッツ感"]], [["レモンの香り","青々しい華やかさ"],["オレンジの香り","ナッツの香ばしさ"],["チョコレートの香り","力強い焙煎香"]], ["SHB","アンティグア"]],
+    ["コロンビア",   3,2,4,3, 2, [["柑橘の酸味","キャラメルの甘さ"],["キャラメルの甘さ","柑橘の爽やかさ"],["香ばしいカラメル","しっかりコク"]], [["レモンの香り","はちみつの香り"],["キャラメルの香り","オレンジの香り"],["香ばしいナッツ","焙煎香の深み"]], ["スプレモ","ナリーニョ"]],
+    ["ブラジル",     2,3,3,4, 3, [["ナッツの香ばしさ","やわらかな甘み"],["ナッツの香ばしさ","チョコの甘さ"],["香ばしいナッツ感","チョコの甘さ"]], [["アーモンドの香り","ミルクの香り"],["ヘーゼルナッツ","ミルクチョコ感"],["香ばしいカカオ","ピーナッツの香り"]], ["ピーベリー","ショコラ"]],
+    ["コスタリカ",   4,2,4,3, 1, [["ハニーの甘さ","柑橘の爽快感"],["ハニーの甘さ","穏やかな酸味"],["カラメルの甘さ","香ばしいコク"]], [["みかんの花の香り","はちみつの香り"],["熟した柑橘の香り","キャラメルの香り"],["キャラメルの香り","ナッツの深み"]], ["タラス","SHB"]],
+    ["エチオピア",   4,1,4,2, 1, [["いちごの甘酸っぱさ","ベリーの華やかさ"],["ベリーの優しい甘さ","穏やかな華やかさ"],["熟したベリーの甘み","香ばしいコク"]], [["ジャスミンの香り","ブルーベリーの香り"],["白い花の香り","ベリーの香り"],["カカオの香り","落ち着いた甘さ"]], ["イルガチェフェ","シダモ"]],
+    ["ケニア",       5,2,3,4, 1, [["カシスの果実味","際立つ強い酸味"],["カシスの果実感","引き締まった酸味"],["果実の甘み","力強いコクと苦味"]], [["ベリーの芳香","柑橘の香り"],["熟したベリー香","爽やかな柑橘感"],["カカオの香り","力強い焙煎香"]], ["AA","キリニャガ"]],
+    ["ルワンダ",     4,1,4,3, 1, [["ベリーのジューシーさ","柑橘の爽やかさ"],["ベリーの甘酸っぱさ","柑橘の爽やかさ"],["ベリーの甘み","しっかりコク"]], [["オレンジの香り","ベリーの香り"],["柑橘の香り","ベリーの香り"],["カカオの香り","香ばしいナッツ"]], ["ブルボン","ニャンザ"]],
+    ["イエメン",     4,2,4,4, 2, [["ベリーの酸味","はじける果実感"],["レーズンの甘さ","ダークチョコ感"],["赤ワインの濃厚さ","ビターチョコの苦味"]], [["ブルーベリーの香り","青々しい果実感"],["赤ワインの香り","シナモンの香り"],["干しぶどうの香り","スモーキーな香り"]], ["モカマタリ","モカサナニ"]],
+    ["ジャマイカ",   3,2,3,3, 2, [["すっきり酸味","上品な軽やかさ"],["上品な口当たり","絶妙なバランス"],["まろやかなコク","落ち着いた甘み"]], [["レモンの香り","澄んだ爽やかさ"],["上品な香り","ほのかな甘さ"],["まろやかな香り","ナッツの香ばしさ"]], ["No.1","ピーベリー"]],
+    ["インドネシア", 1,5,2,5, 3, [["すっきりハーブ感","軽やかな甘さ"],["ほろ苦いチョコ感","コクのある甘さ"],["カカオの深い味わい","黒糖のような甘さ"]], [["青々しいハーブ香","ほのかなスパイス香"],["クローブの香り","カカオの香り"],["香ばしい焙煎香","シナモンの香り"]], ["マンデリン","トラジャ"]],
+    ["パナマ",       4,1,3,2, 1, [["ジャスミンの華やかさ","紅茶の上品さ"],["ジャスミンの香り高さ","やわらかな甘み"],["紅茶の落ち着き","まろやかなコク"]], [["白桃の香り","アールグレイ香"],["紅茶の上品な香り","白い花の香り"],["ほうじ茶の香り","ナッツの深み"]], ["ゲイシャ","ボケテ"]],
+    ["ハワイ",       3,2,3,3, 2, [["すっきり酸味","爽やかな後味"],["柔らかい酸味","上品な甘さ"],["まろやかなコク","穏やかな甘み"]], [["青いりんごの香り","ほのかな柑橘香"],["穏やかな香り","はちみつの香り"],["ナッツの香り","キャラメルの香り"]], ["コナ","エクストラファンシー"]],
+    ["メキシコ",     3,2,3,2, 2, [["すっきり酸味","軽やかなナッツ感"],["ナッツの香ばしさ","黒糖の優しい甘さ"],["香ばしいナッツ感","黒糖の濃い甘さ"]], [["青りんごの香り","アーモンドの香り"],["アーモンドの香り","ほのかなキャラメル香"],["ローストしたナッツ","カカオの香ばしさ"]], ["アルトゥラ","チアパス"]],
+    ["ペルー",       2,2,3,3, 3, [["やさしい酸味","すっきり軽さ"],["まろやかな口当たり","ほのかなナッツ感"],["なめらかな口当たり","穏やかなナッツの甘さ"]], [["青りんごの香り","すっきり爽やかさ"],["アーモンドの香り","やさしい甘い香り"],["ナッツの香り","チョコの香り"]], ["チャンチャマヨ","オーガニック"]],
+    ["パプアニューギニア", 3,3,3,4, 3, [["パイナップルの酸味","トロピカルな華やかさ"],["カカオの深み","果実の甘さ"],["チョコレートの深み","熱帯果実の甘さ"]], [["マンゴーの香り","はじける果実感"],["カカオの香り","パイナップルの香り"],["香ばしいカカオ","ドライマンゴー"]], ["シグリ","マウントハーゲン"]],
+    ["インド",       1,4,2,4, 3, [["すっきり酸味","穏やかな甘さ"],["シナモンの甘み","まろやかな口当たり"],["ナツメグ香る甘さ","どっしりコク"]], [["ほのかなスパイス香","青々しいハーブ感"],["落ち着いたナッツ香","ほのかなシナモン香"],["ナツメグの香り","シナモンの香り"]], ["マラバールAA","プランテーションA"]],
+    ["ブルンジ",     4,1,4,3, 1, [["ベリーの爽やかさ","花の上品な甘さ"],["ベリーの甘酸っぱさ","穏やかな華やかさ"],["熟したベリーの甘み","まろやかなコク"]], [["ジャスミンの香り","ラズベリーの香り"],["白い花の香り","ほのかな柑橘感"],["香ばしいナッツ香","カカオの深み"]], ["カヤンザ","ブルボン"]]
+  ];
+
+  // roast shifts the same beans toward: more acidity & aroma (light) <-> more bitterness & body (dark).
+  // sweetness peaks around medium roast as sugars caramelize, then drops at dark as bitterness masks it.
+  var CURVE = {
+    acid:  {1: 1, 2: 0, 3: -1},
+    bitter:{1: -1, 2: 0, 3: 1},
+    sweet: {1: 0, 2: 1, 3: -1},
+    body:  {1: -1, 2: 0, 3: 1}
+  };
+  var ROAST_LABEL = {1:'浅', 2:'中', 3:'深'};
+  function clamp15(v){ return Math.max(1, Math.min(5, v)); }
+  // Marks each short phrase/name as a single unbreakable unit, so a line break can
+  // only ever land between units (at the full-width space or "、") -- never inside one.
+  function wrapNw(arr){ return arr.map(function(s){ return '<span class="nw">' + s + '</span>'; }); }
+
+  // ---- expanded data: [name, acidity(1-5), bitterness(1-5), sweetness(1-5), body(1-5), description, roast('浅'|'中'|'深'), aroma, notable names] ----
+  var ORIGINS = [];
+  ORIGINS_BASE.forEach(function(b){
+    var name=b[0], bAcid=b[1], bBitter=b[2], bSweet=b[3], bBody=b[4], basePos=b[5], tastePhrasesByPos=b[6], aromaPhrasesByPos=b[7], notable=b[8];
+    var offAcid = bAcid - CURVE.acid[basePos];
+    var offBitter = bBitter - CURVE.bitter[basePos];
+    var offSweet = bSweet - CURVE.sweet[basePos];
+    var offBody = bBody - CURVE.body[basePos];
+    [1,2,3].forEach(function(pos){
+      ORIGINS.push([
+        name,
+        clamp15(offAcid + CURVE.acid[pos]),
+        clamp15(offBitter + CURVE.bitter[pos]),
+        clamp15(offSweet + CURVE.sweet[pos]),
+        clamp15(offBody + CURVE.body[pos]),
+        wrapNw(tastePhrasesByPos[pos-1]).join('　'),
+        ROAST_LABEL[pos],
+        wrapNw(aromaPhrasesByPos[pos-1]).join('　'),
+        wrapNw(notable).join('、')
+      ]);
+    });
+  });
+
+  var svg = document.getElementById('plot');
+  var detailEl = document.getElementById('detail');
+  var NS = 'http://www.w3.org/2000/svg';
+
+  var VB = {w:440, h:396};
+  var PLOT = {left:52, right:416, top:22, bottom:370};
+  var PW = PLOT.right - PLOT.left, PH = PLOT.bottom - PLOT.top;
+
+  function dataToX(v){ return PLOT.left + (v-1)/4 * PW; }
+  function dataToY(v){ return PLOT.bottom - (v-1)/4 * PH; } // higher body = up
+  function xToData(px){ return 1 + Math.max(0, Math.min(1, (px-PLOT.left)/PW)) * 4; }
+  function yToData(py){ return 1 + Math.max(0, Math.min(1, (PLOT.bottom-py)/PH)) * 4; }
+
+  function el(tag, attrs, parent){
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  // Each of the 39 entries owns a zone of the plot (a Voronoi cell around its own seed
+  // coordinate), so every entry is reachable somewhere and tapping anywhere always
+  // matches exactly one. Entries that land on the exact same (acid, body) value would
+  // otherwise tie and make all but one unreachable -- so duplicates get a tiny, fixed
+  // nudge to their matching seed (not shown anywhere) just to break the tie.
+  var groups = {};
+  ORIGINS.forEach(function(o, i){
+    var key = o[1]+'_'+o[4];
+    (groups[key] = groups[key] || []).push(i);
+  });
+  var SEEDS = new Array(ORIGINS.length);
+  Object.keys(groups).forEach(function(key){
+    var idxs = groups[key];
+    var n = idxs.length;
+    idxs.forEach(function(idx, j){
+      var o = ORIGINS[idx];
+      if (n === 1){ SEEDS[idx] = {x:o[1], y:o[4]}; return; }
+      var angle = (Math.PI * 2 * j / n) - Math.PI/2;
+      var r = 0.32; // small nudge in data units (scale is 1-5), just enough to separate ties
+      SEEDS[idx] = { x: o[1] + Math.cos(angle)*r, y: o[4] + Math.sin(angle)*r };
+    });
+  });
+
+  function render(){
+    svg.innerHTML = '';
+
+    var midX = dataToX(3), midY = dataToY(3);
+
+    // arrowhead marker, shared by both axes
+    var defs = el('defs', {}, svg);
+    var marker = el('marker', {id:'axisArrow', markerWidth:8, markerHeight:8, refX:6, refY:3, orient:'auto', markerUnits:'userSpaceOnUse'}, defs);
+    el('path', {d:'M0,0 L6,3 L0,6 Z', class:'axis-arrow-head'}, marker);
+
+    // a conventional X-Y plane: axes cross at the midpoint (3,3), splitting the
+    // plot into four quadrants, with an arrow on each axis pointing toward "more".
+    el('line', {x1:PLOT.left, y1:midY, x2:PLOT.right-2, y2:midY, class:'axis-line', 'marker-end':'url(#axisArrow)'}, svg);
+    el('line', {x1:midX, y1:PLOT.bottom, x2:midX, y2:PLOT.top+2, class:'axis-line', 'marker-end':'url(#axisArrow)'}, svg);
+
+    var ax = el('text', {x:PLOT.right, y:midY-8, class:'axis-label', 'text-anchor':'end'}, svg);
+    ax.textContent = '酸味';
+    var ay = el('text', {x:midX, y:PLOT.top-6, class:'axis-label', 'text-anchor':'middle'}, svg);
+    ay.textContent = 'コク';
+
+    // quadrant character labels
+    function qlabel(x, y, anchor, text){
+      var t = el('text', {x:x, y:y, class:'quad-label', 'text-anchor':anchor}, svg);
+      text.split('\n').forEach(function(line, i){
+        var ts = el('tspan', {x:x, dy: i===0?0:12}, t);
+        ts.textContent = line;
+      });
+    }
+    qlabel(PLOT.right-8, PLOT.top+14, 'end', 'フルーティー\nで芳醇');
+    qlabel(PLOT.left+8, PLOT.top+14, 'start', '重厚で\nアーシー');
+    qlabel(PLOT.right-8, PLOT.bottom-6, 'end', '華やかで\n軽やか');
+    qlabel(PLOT.left+8, PLOT.bottom-6, 'start', 'やさしく\nマイルド');
+
+    // layer for the revealed point, kept separate so re-render() never wipes it
+    el('g', {id:'pointsLayer'}, svg);
+
+    // tap pulse ring (hidden until first tap)
+    el('circle', {cx:-100, cy:-100, r:8, class:'tap-marker', id:'tapMarker'}, svg);
+  }
+
+  // current reveal: which of the 39 entries, where it was tapped, and whether its
+  // detail is expanded. Everything else (the map dot/label, the panel below) is a
+  // render of this one piece of state -- nothing is pre-plotted ahead of a tap.
+  var current = null; // {idx, px, py, expanded, dotEl, labelEl}
+
+  // Draws the single reveal exactly where the viewer tapped -- never snapped to the
+  // origin's own "true" coordinate -- so the map stays blank until tapped and only
+  // ever shows the one most recent answer. Tapping that dot/label again (handled in
+  // handleTap via evt.target) toggles the detail panel below, without moving it.
+  function renderPoint(){
+    var layer = document.getElementById('pointsLayer');
+    if (!layer) return;
+    layer.innerHTML = '';
+    if (!current) return;
+    var o = ORIGINS[current.idx], px = current.px, py = current.py;
+    current.dotEl = el('circle', {cx:px, cy:py, r:4, class:'origin-dot selected'}, layer);
+    var anchor = px > (PLOT.left+PLOT.right)/2 ? 'end' : 'start';
+    var labelX = px + (px > (PLOT.left+PLOT.right)/2 ? -9 : 9);
+    var labelY = py > PLOT.top + 14 ? py - 10 : py + 16;
+    current.labelEl = el('text', {x:labelX, y:labelY, class:'origin-label selected', 'text-anchor':anchor}, layer);
+    current.labelEl.textContent = o[0] + '（' + o[6] + '）';
+  }
+
+  function quadrantTag(acid, body){
+    var right = acid >= 3, top = body >= 3;
+    if (right && top) return 'フルーティーで芳醇ゾーン';
+    if (!right && top) return '重厚でアーシーゾーン';
+    if (right && !top) return '華やかで軽やかゾーン';
+    return 'やさしくマイルドゾーン';
+  }
+
+  function starRow(label, val){
+    var filled = '★'.repeat(val), empty = '★'.repeat(5-val);
+    return '<div class="score-row"><span class="label">' + label + '</span>' +
+      '<span class="stars"><span class="filled">' + filled + '</span><span class="empty">' + empty + '</span></span></div>';
+  }
+
+  function renderDetail(){
+    if (!current){
+      detailEl.innerHTML = '<p class="placeholder">チャートをタップすると<br>ここに近い産地が表示されます。</p>';
+      return;
+    }
+    var o = ORIGINS[current.idx];
+    var nameHtml = '<span class="nw">' + o[0] + '</span><span class="roast-tag nw roast-' + o[6] + '">（' + o[6] + '）</span>';
+    if (!current.expanded){
+      detailEl.innerHTML =
+        '<div class="detail-compact" id="detailCompact"><span class="name">' + nameHtml + '</span>' +
+        '<span class="tap-hint">タップで詳細を見る</span></div>';
+      var compact = document.getElementById('detailCompact');
+      if (compact) compact.addEventListener('click', function(){ current.expanded = true; renderDetail(); });
+      return;
+    }
+    detailEl.innerHTML =
+      '<div class="result-top"><h3>' + nameHtml + '</h3><span class="quad-tag">' + quadrantTag(o[1], o[4]) + '</span></div>' +
+      '<p class="notable"><b>代表的な銘柄</b> ー<br>' + o[8] + '</p>' +
+      '<p class="aroma"><b>香り</b> ー<br>' + o[7] + '</p>' +
+      '<p class="desc"><b>味わい</b> ー<br>' + o[5] + '</p>' +
+      '<div class="scores">' +
+        starRow('酸味', o[1]) + starRow('苦味', o[2]) + starRow('甘み', o[3]) + starRow('コク', o[4]) +
+      '</div>' +
+      '<p class="collapse-hint" id="detailCollapse">閉じる</p>';
+    var collapse = document.getElementById('detailCollapse');
+    if (collapse) collapse.addEventListener('click', function(){ current.expanded = false; renderDetail(); });
+  }
+
+  function nearestOrigin(acid, body){
+    var best = 0, bestDist = Infinity;
+    SEEDS.forEach(function(s, i){
+      var dx = s.x-acid, dy = s.y-body;
+      var dist = dx*dx + dy*dy;
+      if (dist < bestDist){ bestDist = dist; best = i; }
+    });
+    return best;
+  }
+
+  function handleTap(evt){
+    // tapping directly on the currently revealed dot/label toggles its detail,
+    // without re-matching or moving the marker.
+    if (current && (evt.target === current.dotEl || evt.target === current.labelEl)){
+      current.expanded = !current.expanded;
+      renderDetail();
+      return;
+    }
+
+    var rect = svg.getBoundingClientRect();
+    var clientX = evt.touches ? evt.touches[0].clientX : evt.clientX;
+    var clientY = evt.touches ? evt.touches[0].clientY : evt.clientY;
+    var scaleX = VB.w / rect.width, scaleY = VB.h / rect.height;
+    var px = (clientX - rect.left) * scaleX;
+    var py = (clientY - rect.top) * scaleY;
+    px = Math.max(PLOT.left, Math.min(PLOT.right, px));
+    py = Math.max(PLOT.top, Math.min(PLOT.bottom, py));
+
+    var marker = document.getElementById('tapMarker');
+    if (marker){
+      marker.setAttribute('cx', px); marker.setAttribute('cy', py);
+      marker.classList.add('active');
+      marker.style.animation = 'none';
+      requestAnimationFrame(function(){ marker.style.animation = ''; });
+    }
+
+    var acid = xToData(px), body = yToData(py);
+    var idx = nearestOrigin(acid, body);
+    current = { idx: idx, px: px, py: py, expanded: false };
+    renderPoint();
+    renderDetail();
+  }
+
+  svg.addEventListener('click', handleTap);
+
+  render();
+})();
+</script>
